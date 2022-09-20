@@ -1,0 +1,110 @@
+---
+title: "R Notebook"
+output: html_notebook
+runtime: shiny
+---
+```{r}
+library(tidyverse)
+library(sf)
+library(tidygraph)
+library(sfnetworks)
+library(shiny)
+
+nodes = read_csv('Viabundus-1.0-CSV/Nodes.csv')
+edges = read_csv('Viabundus-1.0-CSV/Edges.csv')
+
+nodes = nodes %>% mutate(ID = ID +1)
+```
+
+```{r}
+edges_sf = edges %>% st_as_sf(wkt = 'WKT')
+
+sf_nodes = nodes %>% st_as_sf(coords = c('Longitude', 'Latitude'))
+
+sf_nodes = sf_nodes %>% st_set_crs(4326)
+
+sf_nodes = sf_nodes %>% mutate(name_with_id = paste0(Name, " (", ID))
+
+net = as_sfnetwork(edges_sf, directed = F)
+
+nodes_from_edges = net %>% as_tibble()%>% mutate(node_id = 1:nrow(.))
+
+nodes_from_edges= nodes_from_edges %>% st_set_crs(4326)
+
+
+joined_nodes = st_join(nodes_from_edges, sf_nodes,  join = st_nearest_feature) 
+
+net = net %>% st_set_crs(4326)
+net = net %>% st_join(sf_nodes, join = st_nearest_feature)
+
+net = net %>%
+  activate("edges") %>%
+  mutate(weight = edge_length())
+
+paths = st_network_paths(net %>%
+  activate("edges") %>%
+  mutate(time = weight / 7), from =5355, to = 5648)
+
+node_list = paths %>%
+  slice(1) %>%
+  pull(node_paths) %>%
+  unlist() %>% as_tibble()
+
+edge_list = paths %>%
+  slice(1) %>%
+  pull(edge_paths) %>%
+  unlist() %>% as_tibble()
+
+line_to_draw = net %>% 
+  activate(edges) %>% 
+  as_tibble() %>% 
+  mutate(edge_id = 1:nrow(.)) %>% filter(edge_id %in% edge_list$value)
+
+nodes_to_draw = net %>% 
+  activate(nodes) %>% 
+  as_tibble() %>% 
+  mutate(node_id = 1:nrow(.)) %>% filter(node_id %in% node_list$value)
+
+
+
+```
+
+```{r}
+library(leaflet)
+
+leaflet() %>%
+  addTiles() %>% 
+  addPolylines(data = line_to_draw) %>% 
+  addCircleMarkers(data = nodes_to_draw, label = ~Name)
+```
+
+```{r}
+p = net %>%
+  st_geometry() %>%
+  st_combine() %>%
+  st_centroid()
+
+thresholds = rev(seq(100000, 1000000, 100000))
+palette = sf.colors(n = 10)
+
+nbh = list()
+
+
+for (i in c(1:10)) {
+  nbh[[i]] = convert(net, to_spatial_neighborhood, p, thresholds[i])
+}
+
+
+ggplot() + geom_sf(data = nbh[[1]] %>% activate(edges) %>% as_tibble(), color = palette[1]) +
+  geom_sf(data = nbh[[2]] %>% activate(edges) %>% as_tibble(), color = palette[2])+
+  geom_sf(data = nbh[[3]] %>% activate(edges) %>% as_tibble(), color = palette[3])+
+  geom_sf(data = nbh[[4]] %>% activate(edges) %>% as_tibble(), color = palette[4])+
+  geom_sf(data = nbh[[5]] %>% activate(edges) %>% as_tibble(), color = palette[5])+
+  geom_sf(data = nbh[[6]] %>% activate(edges) %>% as_tibble(), color = palette[6])+
+  geom_sf(data = nbh[[7]] %>% activate(edges) %>% as_tibble(), color = palette[7])+
+  geom_sf(data = nbh[[8]] %>% activate(edges) %>% as_tibble(), color = palette[8])+
+  geom_sf(data = nbh[[9]] %>% activate(edges) %>% as_tibble(), color = palette[9])+
+  geom_sf(data = nbh[[10]] %>% activate(edges) %>% as_tibble(), color = palette[10])
+
+```
+
